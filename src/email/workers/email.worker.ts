@@ -5,19 +5,28 @@ import { Worker } from "bullmq";
 import { redis } from "../../config/redis";
 import { EMAIL_QUEUE } from "../queues/email.queue";
 import { emailDLQ } from "../queues/email.dlq";
-import { sendMail } from "../utils/mailer";
+import { sendWithFallback } from "../services/router";
+import { wasSent, markSent } from "../utils/deliveryState";
 
 const worker = new Worker(
   EMAIL_QUEUE,
 
   async (job) => {
+    const jobId = String(job.id);
+
+    if (await wasSent(jobId)) {
+      console.log(`♻️ Skipping duplicate send ${jobId}`);
+      return;
+    }
+
     const { to, subject, html } = job.data;
 
     if (!to || !subject || !html) {
       throw new Error("Invalid email payload");
     }
 
-    await sendMail({ to, subject, html });
+    await sendWithFallback(to, subject, html);
+    await markSent(jobId);
   },
 
   {
